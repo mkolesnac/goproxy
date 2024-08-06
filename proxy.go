@@ -25,7 +25,7 @@ type ProxyHttpServer struct {
 	reqHandlers       []ReqHandler
 	respHandlers      []RespHandler
 	httpsHandlers     []HttpsHandler
-	websocketHandlers []WebsocketHandler
+	WebsocketHandlers []WebsocketHandler
 	Tr                *http.Transport
 	// ConnectDial will be used to create TCP connections for CONNECT requests
 	// if nil Tr.Dial will be used
@@ -81,7 +81,7 @@ func (proxy *ProxyHttpServer) filterResponse(respOrig *http.Response, ctx *Proxy
 }
 func (proxy *ProxyHttpServer) filterWebsocketMsg(r io.Reader, ctx *ProxyCtx) (reader io.Reader) {
 	reader = r
-	for _, h := range proxy.websocketHandlers {
+	for _, h := range proxy.WebsocketHandlers {
 		reader = h.Handle(r, ctx)
 		// non-nil resp means the handler decided to skip sending the request
 		// and return canned response instead.
