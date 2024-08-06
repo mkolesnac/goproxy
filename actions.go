@@ -1,6 +1,9 @@
 package goproxy
 
-import "net/http"
+import (
+	"io"
+	"net/http"
+)
 
 // ReqHandler will "tamper" with the request coming to the proxy server
 // If Handle returns req,nil the proxy will send the returned request
@@ -54,4 +57,14 @@ type FuncHttpsHandler func(host string, ctx *ProxyCtx) (*ConnectAction, string)
 // FuncHttpsHandler should implement the RespHandler interface
 func (f FuncHttpsHandler) HandleConnect(host string, ctx *ProxyCtx) (*ConnectAction, string) {
 	return f(host, ctx)
+}
+
+type WebsocketHandler interface {
+	Handle(r io.Reader, ctx *ProxyCtx) io.Reader
+}
+
+type FuncWebsocketHandler func(r io.Reader, ctx *ProxyCtx) io.Reader
+
+func (f FuncWebsocketHandler) Handle(r io.Reader, ctx *ProxyCtx) io.Reader {
+	return f(r, ctx)
 }

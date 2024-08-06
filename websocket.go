@@ -109,6 +109,7 @@ func (proxy *ProxyHttpServer) websocketHandshake(ctx *ProxyCtx, req *http.Reques
 func (proxy *ProxyHttpServer) proxyWebsocket(ctx *ProxyCtx, dest io.ReadWriter, source io.ReadWriter) {
 	errChan := make(chan error, 2)
 	cp := func(dst io.Writer, src io.Reader) {
+		src = proxy.filterWebsocketMsg(src, ctx)
 		_, err := io.Copy(dst, src)
 		ctx.Warnf("Websocket error: %v", err)
 		errChan <- err
