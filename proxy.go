@@ -19,14 +19,14 @@ type ProxyHttpServer struct {
 	// KeepDestinationHeaders indicates the proxy should retain any headers present in the http.Response before proxying
 	KeepDestinationHeaders bool
 	// setting Verbose to true will log information on each request sent to the proxy
-	Verbose           bool
-	Logger            Logger
-	NonproxyHandler   http.Handler
-	reqHandlers       []ReqHandler
-	respHandlers      []RespHandler
-	httpsHandlers     []HttpsHandler
-	WebsocketHandlers []WebsocketHandler
-	Tr                *http.Transport
+	Verbose         bool
+	Logger          Logger
+	NonproxyHandler http.Handler
+	reqHandlers     []ReqHandler
+	respHandlers    []RespHandler
+	httpsHandlers   []HttpsHandler
+	WSHandler       WebsocketHandler
+	Tr              *http.Transport
 	// ConnectDial will be used to create TCP connections for CONNECT requests
 	// if nil Tr.Dial will be used
 	ConnectDial        func(network string, addr string) (net.Conn, error)
@@ -76,18 +76,6 @@ func (proxy *ProxyHttpServer) filterResponse(respOrig *http.Response, ctx *Proxy
 	for _, h := range proxy.respHandlers {
 		ctx.Resp = resp
 		resp = h.Handle(resp, ctx)
-	}
-	return
-}
-func (proxy *ProxyHttpServer) filterWebsocketMsg(r io.Reader, ctx *ProxyCtx) (reader io.Reader) {
-	reader = r
-	for _, h := range proxy.WebsocketHandlers {
-		reader = h.Handle(r, ctx)
-		// non-nil resp means the handler decided to skip sending the request
-		// and return canned response instead.
-		if reader != nil {
-			break
-		}
 	}
 	return
 }
@@ -223,11 +211,10 @@ func (proxy *ProxyHttpServer) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 // NewProxyHttpServer creates and returns a proxy server, logging to stderr by default
 func NewProxyHttpServer() *ProxyHttpServer {
 	proxy := ProxyHttpServer{
-		Logger:            log.New(os.Stderr, "", log.LstdFlags),
-		reqHandlers:       []ReqHandler{},
-		respHandlers:      []RespHandler{},
-		httpsHandlers:     []HttpsHandler{},
-		WebsocketHandlers: []WebsocketHandler{},
+		Logger:        log.New(os.Stderr, "", log.LstdFlags),
+		reqHandlers:   []ReqHandler{},
+		respHandlers:  []RespHandler{},
+		httpsHandlers: []HttpsHandler{},
 		NonproxyHandler: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			http.Error(w, "This is a proxy server. Does not respond to non-proxy requests.", 500)
 		}),

@@ -108,15 +108,51 @@ func (proxy *ProxyHttpServer) websocketHandshake(ctx *ProxyCtx, req *http.Reques
 
 func (proxy *ProxyHttpServer) proxyWebsocket(ctx *ProxyCtx, dest io.ReadWriter, source io.ReadWriter) {
 	errChan := make(chan error, 2)
+	//cp := func(dst io.Writer, src io.Reader) {
+	//	src = proxy.filterWebsocketMsg(src, ctx)
+	//	_, err := io.Copy(dst, src)
+	//	ctx.Warnf("Websocket error: %v", err)
+	//	errChan <- err
+	//}
+
 	cp := func(dst io.Writer, src io.Reader) {
-		src = proxy.filterWebsocketMsg(src, ctx)
-		_, err := io.Copy(dst, src)
-		ctx.Warnf("Websocket error: %v", err)
-		errChan <- err
+		msg, err := readWebSocketMessage(src)
+		if err != nil {
+			errChan <- err
+			return
+		}
+
+		// If a WSHandler is defined, call it to potentially modify the message
+		if proxy.WSHandler != nil {
+			msg = proxy.WSHandler.Handle(msg, ctx)
+		}
+
+		// Write the (possibly modified) message to the destination
+		_, err = dst.Write(msg)
+		if err != nil {
+			errChan <- err
+		}
 	}
 
 	// Start proxying websocket data
 	go cp(dest, source)
 	go cp(source, dest)
 	<-errChan
+}
+
+func readWebSocketMessage(src io.Reader) ([]byte, error) {
+	var fullMessage []byte
+	buf := make([]byte, 4096)
+	for {
+		n, err := src.Read(buf)
+		if err != nil && err != io.EOF {
+			return nil, err
+		}
+		fullMessage = append(fullMessage, buf[:n]...)
+		if n < len(buf) {
+			// Assuming EOF or the end of the message is reached
+			break
+		}
+	}
+	return fullMessage, nil
 }

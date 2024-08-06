@@ -1,7 +1,6 @@
 package goproxy
 
 import (
-	"io"
 	"net/http"
 )
 
@@ -60,11 +59,11 @@ func (f FuncHttpsHandler) HandleConnect(host string, ctx *ProxyCtx) (*ConnectAct
 }
 
 type WebsocketHandler interface {
-	Handle(r io.Reader, ctx *ProxyCtx) io.Reader
+	Handle(msg []byte, ctx *ProxyCtx) []byte
 }
 
-type FuncWebsocketHandler func(r io.Reader, ctx *ProxyCtx) io.Reader
+type FuncWebsocketHandler func(msg []byte, ctx *ProxyCtx) []byte
 
-func (f FuncWebsocketHandler) Handle(r io.Reader, ctx *ProxyCtx) io.Reader {
-	return f(r, ctx)
+func (f FuncWebsocketHandler) Handle(msg []byte, ctx *ProxyCtx) []byte {
+	return f(msg, ctx)
 }
