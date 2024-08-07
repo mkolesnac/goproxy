@@ -19,11 +19,18 @@ const (
 	PongMessage   = 10
 )
 
-func readWebSocketMessage(conn net.Conn) (int, []byte, error) {
+type WSMessage struct {
+	opcode     byte
+	mask       bool
+	maskingKey []byte
+	data       []byte
+}
+
+func readWebSocketMessage(conn net.Conn) (WSMessage, error) {
 	// Read the first 2 bytes of the frame
 	header := make([]byte, 2)
 	if _, err := io.ReadFull(conn, header); err != nil {
-		return 0, nil, err
+		return WSMessage{}, err
 	}
 
 	fin := header[0] & 0x80
@@ -32,7 +39,7 @@ func readWebSocketMessage(conn net.Conn) (int, []byte, error) {
 	payloadLen := header[1] & 0x7F
 
 	if fin == 0 {
-		return 0, nil, fmt.Errorf("fragmented frames not supported")
+		return WSMessage{}, fmt.Errorf("fragmented frames not supported")
 	}
 
 	// Determine the payload length
@@ -40,13 +47,13 @@ func readWebSocketMessage(conn net.Conn) (int, []byte, error) {
 	if payloadLen == 126 {
 		extendedPayload := make([]byte, 2)
 		if _, err := io.ReadFull(conn, extendedPayload); err != nil {
-			return 0, nil, err
+			return WSMessage{}, err
 		}
 		extendedPayloadLen = uint64(binary.BigEndian.Uint16(extendedPayload))
 	} else if payloadLen == 127 {
 		extendedPayload := make([]byte, 8)
 		if _, err := io.ReadFull(conn, extendedPayload); err != nil {
-			return 0, nil, err
+			return WSMessage{}, err
 		}
 		extendedPayloadLen = binary.BigEndian.Uint64(extendedPayload)
 	} else {
@@ -58,14 +65,14 @@ func readWebSocketMessage(conn net.Conn) (int, []byte, error) {
 	if mask != 0 {
 		maskingKey = make([]byte, 4)
 		if _, err := io.ReadFull(conn, maskingKey); err != nil {
-			return 0, nil, err
+			return WSMessage{}, err
 		}
 	}
 
 	// Read the payload data
 	payloadData := make([]byte, extendedPayloadLen)
 	if _, err := io.ReadFull(conn, payloadData); err != nil {
-		return 0, nil, err
+		return WSMessage{}, err
 	}
 
 	// Unmask the payload data if necessary
@@ -75,7 +82,21 @@ func readWebSocketMessage(conn net.Conn) (int, []byte, error) {
 		}
 	}
 
-	return int(opcode), payloadData, nil
+	msg := WSMessage{
+		opcode:     opcode,
+		mask:       mask != 0,
+		maskingKey: maskingKey,
+		data:       payloadData,
+	}
+	return msg, nil
+}
+
+func applyWebSocketMask(payloadData []byte, maskingKey []byte) []byte {
+	maskedData := make([]byte, len(payloadData))
+	for i := 0; i < len(payloadData); i++ {
+		maskedData[i] = payloadData[i] ^ maskingKey[i%4]
+	}
+	return maskedData
 }
 
 func handleWebSocketConnection(clientConn, targetConn *tls.Conn) {
@@ -85,14 +106,14 @@ func handleWebSocketConnection(clientConn, targetConn *tls.Conn) {
 
 	go func() {
 		for {
-			opcode, message, err := readWebSocketMessage(clientNetConn)
+			message, err := readWebSocketMessage(clientNetConn)
 			if err != nil {
 				errChan <- err
 				log.Printf("Error reading from client: %v", err)
 				return
 			}
-			log.Printf("[Client to Target] Opcode: %d, Message: %s", opcode, string(message))
-			if _, err := targetNetConn.Write(constructWebSocketFrame(opcode, message)); err != nil {
+			log.Printf("[Client to Target] Opcode: %d, Message: %s", message.opcode, string(message.data))
+			if err := writeWebsocketMessage(targetNetConn, message); err != nil {
 				errChan <- err
 				log.Printf("Error writing to target: %v", err)
 				return
@@ -102,14 +123,14 @@ func handleWebSocketConnection(clientConn, targetConn *tls.Conn) {
 
 	go func() {
 		for {
-			opcode, message, err := readWebSocketMessage(targetNetConn)
+			message, err := readWebSocketMessage(targetNetConn)
 			if err != nil {
 				errChan <- err
 				log.Printf("Error reading from target: %v", err)
 				return
 			}
-			log.Printf("[Target to Client] Opcode: %d, Message: %s", opcode, string(message))
-			if _, err := clientNetConn.Write(constructWebSocketFrame(opcode, message)); err != nil {
+			log.Printf("[Target to Client] Opcode: %d, Message: %s", message.opcode, string(message.data))
+			if err := writeWebsocketMessage(clientNetConn, message); err != nil {
 				errChan <- err
 				log.Printf("Error writing to client: %v", err)
 				return
@@ -124,11 +145,40 @@ func wrapTLSConn(conn *tls.Conn) net.Conn {
 	return conn
 }
 
-func constructWebSocketFrame(opcode int, payload []byte) []byte {
+func writeWebsocketMessage(conn net.Conn, msg WSMessage) error {
 	var buffer bytes.Buffer
 
 	// First byte: FIN bit set (0x80) and the opcode
-	buffer.WriteByte(0x80 | byte(opcode))
+	buffer.WriteByte(0x80 | msg.opcode)
+
+	// Second byte: Mask bit not set (0x00) and the payload length
+	payloadLen := len(msg.data)
+	if payloadLen <= 125 {
+		buffer.WriteByte(byte(payloadLen))
+	} else if payloadLen <= 65535 {
+		buffer.WriteByte(126)
+		binary.Write(&buffer, binary.BigEndian, uint16(payloadLen))
+	} else {
+		buffer.WriteByte(127)
+		binary.Write(&buffer, binary.BigEndian, uint64(payloadLen))
+	}
+
+	// Payload data
+	payload := msg.data
+	if msg.mask {
+		payload = applyWebSocketMask(msg.data, msg.maskingKey)
+	}
+	buffer.Write(payload)
+
+	_, err := conn.Write(buffer.Bytes())
+	return err
+}
+
+func constructWebSocketFrame(opcode byte, payload []byte) []byte {
+	var buffer bytes.Buffer
+
+	// First byte: FIN bit set (0x80) and the opcode
+	buffer.WriteByte(0x80 | opcode)
 
 	// Second byte: Mask bit not set (0x00) and the payload length
 	payloadLen := len(payload)
