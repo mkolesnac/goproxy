@@ -81,16 +81,19 @@ func readWebSocketMessage(conn net.Conn) (int, []byte, error) {
 func handleWebSocketConnection(clientConn, targetConn *tls.Conn) {
 	clientNetConn := wrapTLSConn(clientConn)
 	targetNetConn := wrapTLSConn(targetConn)
+	errChan := make(chan error, 2)
 
 	go func() {
 		for {
 			opcode, message, err := readWebSocketMessage(clientNetConn)
 			if err != nil {
+				errChan <- err
 				log.Printf("Error reading from client: %v", err)
 				return
 			}
 			log.Printf("[Client to Target] Opcode: %d, Message: %s", opcode, string(message))
 			if _, err := targetNetConn.Write(constructWebSocketFrame(opcode, message)); err != nil {
+				errChan <- err
 				log.Printf("Error writing to target: %v", err)
 				return
 			}
@@ -101,16 +104,20 @@ func handleWebSocketConnection(clientConn, targetConn *tls.Conn) {
 		for {
 			opcode, message, err := readWebSocketMessage(targetNetConn)
 			if err != nil {
+				errChan <- err
 				log.Printf("Error reading from target: %v", err)
 				return
 			}
 			log.Printf("[Target to Client] Opcode: %d, Message: %s", opcode, string(message))
 			if _, err := clientNetConn.Write(constructWebSocketFrame(opcode, message)); err != nil {
+				errChan <- err
 				log.Printf("Error writing to client: %v", err)
 				return
 			}
 		}
 	}()
+
+	<-errChan
 }
 
 func wrapTLSConn(conn *tls.Conn) net.Conn {
