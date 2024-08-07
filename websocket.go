@@ -43,7 +43,8 @@ func (proxy *ProxyHttpServer) serveWebsocketTLS(ctx *ProxyCtx, w http.ResponseWr
 	}
 
 	// Proxy wss connection
-	proxy.proxyWebsocket(ctx, targetConn, clientConn)
+	//proxy.proxyWebsocket(ctx, targetConn, clientConn)
+	handleWebSocketConnection(targetConn, clientConn)
 }
 
 func (proxy *ProxyHttpServer) serveWebsocket(ctx *ProxyCtx, w http.ResponseWriter, req *http.Request) {
@@ -116,7 +117,7 @@ func (proxy *ProxyHttpServer) proxyWebsocket(ctx *ProxyCtx, dest io.ReadWriter, 
 	//}
 
 	cp := func(dst io.Writer, src io.Reader) {
-		msg, err := readWebSocketMessage(src)
+		msg, err := readWebSocketMessage1(src)
 		if err != nil {
 			errChan <- err
 			return
@@ -140,7 +141,7 @@ func (proxy *ProxyHttpServer) proxyWebsocket(ctx *ProxyCtx, dest io.ReadWriter, 
 	<-errChan
 }
 
-func readWebSocketMessage(src io.Reader) ([]byte, error) {
+func readWebSocketMessage1(src io.Reader) ([]byte, error) {
 	var fullMessage []byte
 	buf := make([]byte, 4096)
 	for {
