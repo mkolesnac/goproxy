@@ -151,16 +151,24 @@ func writeWebsocketMessage(conn net.Conn, msg WSMessage) error {
 	// First byte: FIN bit set (0x80) and the opcode
 	buffer.WriteByte(0x80 | msg.opcode)
 
+	maskByte := byte(0)
+	if msg.mask {
+		maskByte = 0x80
+	}
 	// Second byte: Mask bit not set (0x00) and the payload length
 	payloadLen := len(msg.data)
 	if payloadLen <= 125 {
-		buffer.WriteByte(byte(payloadLen))
+		buffer.WriteByte(maskByte | byte(payloadLen))
 	} else if payloadLen <= 65535 {
-		buffer.WriteByte(126)
+		buffer.WriteByte(maskByte | 126)
 		binary.Write(&buffer, binary.BigEndian, uint16(payloadLen))
 	} else {
-		buffer.WriteByte(127)
+		buffer.WriteByte(maskByte | 127)
 		binary.Write(&buffer, binary.BigEndian, uint64(payloadLen))
+	}
+
+	if msg.mask {
+		buffer.Write(msg.maskingKey)
 	}
 
 	// Payload data
